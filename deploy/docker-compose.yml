@@ -1,6 +1,6 @@
 services:
   app:
-    image: ghcr.io/Bxota/tic-tac-toe-mobile:latest
+    image: ghcr.io/bxota/tic-tac-toe-mobile:latest
     restart: unless-stopped
     environment:
       - ADDR=:8080

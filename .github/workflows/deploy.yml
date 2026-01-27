@@ -14,6 +14,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set image name (lowercase)
+        run: echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
+
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
@@ -29,8 +32,8 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - run: |
-          docker build -t ghcr.io/${{ github.repository }}:latest .
-          docker push ghcr.io/${{ github.repository }}:latest
+          docker build -t $IMAGE_NAME:latest .
+          docker push $IMAGE_NAME:latest
 
       - uses: appleboy/ssh-action@v1.0.3
         with:
