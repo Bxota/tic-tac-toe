@@ -1,3 +1,11 @@
+# Build web (Vue)
+FROM node:25-alpine AS web-build
+WORKDIR /src/webapp
+COPY webapp/package.json webapp/package-lock.json* ./
+RUN npm ci
+COPY webapp .
+RUN npm run build
+
 # Build Go server
 FROM golang:1.22-alpine AS server-build
 WORKDIR /src
@@ -11,7 +19,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/tic-tac-toe-server .
 FROM alpine:3.20
 WORKDIR /app
 COPY --from=server-build /out/tic-tac-toe-server /app/tic-tac-toe-server
-COPY build/web /app/web
+COPY --from=web-build /src/webapp/dist /app/web
 ENV ADDR=:8080
 ENV WEB_DIR=/app/web
 EXPOSE 8080

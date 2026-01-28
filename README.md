@@ -1,6 +1,8 @@
 # tic_tac_toe
 
-Flutter (iOS/Android/Web) + Go WebSocket backend for a real-time Tic-Tac-Toe.
+Flutter (iOS/Android) + Vue Web + Go WebSocket backend for a real-time Tic-Tac-Toe.
+
+Web frontend expects Node 25+.
 
 ## Backend (Go)
 
@@ -15,19 +17,28 @@ By default the server listens on `:8080` and exposes:
 - `WS /ws`
 - static web files (if available)
 
-### Serve Flutter Web
+### Serve Vue Web
 
 Build the web bundle from the project root:
 
 ```bash
-flutter build web
+cd webapp
+npm install
+npm run build
+```
+
+Dev server (Node 25+):
+
+```bash
+cd webapp
+npm run dev
 ```
 
 Then run the Go server with the web directory:
 
 ```bash
 cd server
-WEB_DIR=../build/web go run .
+WEB_DIR=../webapp/dist go run .
 ```
 
 ## Flutter app
@@ -47,7 +58,7 @@ flutter run --dart-define=SERVER_URL=ws://YOUR_VPS_IP:8080/ws
 ## Deployment (Docker + Caddy + GitHub Actions)
 
 This repo includes:
-- `Dockerfile` (builds Go server + serves `build/web`)
+- `Dockerfile` (builds Go server + Vue web)
 - `deploy/docker-compose.yml` and `deploy/Caddyfile`
 - `.github/workflows/deploy.yml`
 
@@ -87,11 +98,13 @@ Add these repo secrets:
 - `VPS_USER` (SSH user)
 - `VPS_SSH_KEY` (private key content)
 
-### Flutter Web build URL
+### Vue Web WebSocket URL
 
-The workflow builds Flutter Web with:
+By default, the web app derives the WebSocket URL from the current domain.
+If you want to override it, build with:
+
 ```
---dart-define=SERVER_URL=wss://tictactoe.bxota.com/ws
+VITE_WS_URL=wss://tictactoe.bxota.com/ws npm run build
 ```
 Change it if you use another domain.
 

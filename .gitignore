@@ -24,3 +24,5 @@ ios/Runner/GeneratedPluginRegistrant.*
 coverage/
 *.log
 .DS_Store
+webapp/node_modules/
+webapp/dist/

@@ -868,8 +868,7 @@ func resolveWebDir() string {
 	}
 
 	candidates := []string{
-		"../build/web",
-		"./web",
+		"../webapp/dist",
 	}
 	for _, candidate := range candidates {
 		if dirExists(candidate) {
