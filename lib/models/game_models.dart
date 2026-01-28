@@ -5,14 +5,16 @@ enum ConnectionStatus { disconnected, connecting, connected, error }
 enum GameStatus { waiting, inProgress, paused, win, draw }
 
 class PlayerInfo {
-  const PlayerInfo({required this.id, required this.connected});
+  const PlayerInfo({required this.id, required this.name, required this.connected});
 
   final String id;
+  final String name;
   final bool connected;
 
   factory PlayerInfo.fromJson(Map<String, dynamic> json) {
     return PlayerInfo(
       id: json['id'] as String? ?? '',
+      name: json['name'] as String? ?? '',
       connected: json['connected'] as bool? ?? false,
     );
   }
@@ -62,6 +64,11 @@ class GameState {
 
   bool isPlayerConnected(String symbol) {
     return players[symbol]?.connected ?? false;
+  }
+
+  String playerName(String symbol) {
+    final name = players[symbol]?.name ?? '';
+    return name;
   }
 }
 

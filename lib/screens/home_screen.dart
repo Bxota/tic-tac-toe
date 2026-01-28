@@ -15,8 +15,16 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
+class _JoinResult {
+  const _JoinResult({required this.code, required this.name});
+
+  final String code;
+  final String name;
+}
+
 class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _roomController = TextEditingController();
+  String _lastName = '';
 
   @override
   void dispose() {
@@ -24,19 +32,18 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
-  Future<void> _showJoinDialog() async {
-    _roomController.clear();
+  Future<String?> _showNameDialog({required String title}) async {
+    final nameController = TextEditingController(text: _lastName);
     final result = await showDialog<String>(
       context: context,
       builder: (context) {
         return AlertDialog(
           backgroundColor: AppColors.card,
-          title: const Text('Rejoindre un salon'),
+          title: Text(title),
           content: TextField(
-            controller: _roomController,
-            textCapitalization: TextCapitalization.characters,
+            controller: nameController,
             decoration: const InputDecoration(
-              hintText: 'Code du salon (ex: ABCDEF)',
+              hintText: 'Ton nom',
             ),
           ),
           actions: [
@@ -46,30 +53,74 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             TextButton(
               onPressed: () {
-                Navigator.of(context).pop(_roomController.text.trim());
+                Navigator.of(context).pop(nameController.text.trim());
               },
-              child: const Text('Rejoindre'),
+              child: const Text('Continuer'),
             ),
           ],
         );
       },
     );
-
-    if (result == null || result.isEmpty) {
-      return;
+    nameController.dispose();
+    if (result != null && result.isNotEmpty) {
+      _lastName = result;
     }
+    return result;
+  }
 
-    if (!mounted) {
-      return;
-    }
-
-    widget.controller.leaveRoom();
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => GameScreen(controller: widget.controller),
-      ),
+  Future<_JoinResult?> _showJoinDialog({required bool spectator}) async {
+    _roomController.clear();
+    final nameController = TextEditingController(text: _lastName);
+    final result = await showDialog<_JoinResult>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: AppColors.card,
+          title: Text(spectator ? 'Observer un salon' : 'Rejoindre un salon'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: _roomController,
+                textCapitalization: TextCapitalization.characters,
+                decoration: const InputDecoration(
+                  hintText: 'Code du salon (ex: ABCDEF)',
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: nameController,
+                decoration: const InputDecoration(
+                  hintText: 'Ton nom',
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Annuler'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop(
+                  _JoinResult(
+                    code: _roomController.text.trim(),
+                    name: nameController.text.trim(),
+                  ),
+                );
+              },
+              child: Text(spectator ? 'Observer' : 'Rejoindre'),
+            ),
+          ],
+        );
+      },
     );
-    await widget.controller.joinRoom(result);
+    nameController.dispose();
+    if (result != null && result.name.isNotEmpty) {
+      _lastName = result.name;
+    }
+    return result;
   }
 
   @override
@@ -147,20 +198,68 @@ class _HomeScreenState extends State<HomeScreen> {
               SoftButton(
                 label: 'Creer un salon prive',
                 onPressed: () async {
+                  final name = await _showNameDialog(title: 'Ton nom');
+                  if (name == null) {
+                    return;
+                  }
                   widget.controller.leaveRoom();
                   Navigator.of(context).push(
                     MaterialPageRoute(
                       builder: (_) => GameScreen(controller: widget.controller),
                     ),
                   );
-                  await widget.controller.createRoom();
+                  await widget.controller.createRoom(name: name);
                 },
               ),
               const SizedBox(height: 14),
               SoftButton(
                 label: 'Rejoindre un salon',
                 filled: false,
-                onPressed: _showJoinDialog,
+                onPressed: () async {
+                  final result = await _showJoinDialog(spectator: false);
+                  if (result == null || result.code.isEmpty) {
+                    return;
+                  }
+                  if (!mounted) {
+                    return;
+                  }
+                  widget.controller.leaveRoom();
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => GameScreen(controller: widget.controller),
+                    ),
+                  );
+                  await widget.controller.joinRoom(
+                    result.code,
+                    name: result.name,
+                    spectator: false,
+                  );
+                },
+              ),
+              const SizedBox(height: 12),
+              SoftButton(
+                label: 'Observer un salon',
+                filled: false,
+                onPressed: () async {
+                  final result = await _showJoinDialog(spectator: true);
+                  if (result == null || result.code.isEmpty) {
+                    return;
+                  }
+                  if (!mounted) {
+                    return;
+                  }
+                  widget.controller.leaveRoom();
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => GameScreen(controller: widget.controller),
+                    ),
+                  );
+                  await widget.controller.joinRoom(
+                    result.code,
+                    name: result.name,
+                    spectator: true,
+                  );
+                },
               ),
               const SizedBox(height: 12),
               Text(

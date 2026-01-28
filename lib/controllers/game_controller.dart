@@ -16,6 +16,7 @@ class GameController extends ChangeNotifier {
   String? roomCode;
   String? playerId;
   String? symbol;
+  String? role;
   String? errorMessage;
   bool roomClosed = false;
   String? roomClosedReason;
@@ -25,22 +26,27 @@ class GameController extends ChangeNotifier {
   bool _manualClose = false;
 
   bool get isConnected => connectionStatus == ConnectionStatus.connected;
+  bool get isSpectator => role == 'spectator';
 
-  Future<void> createRoom() async {
+  Future<void> createRoom({required String name}) async {
     roomClosed = false;
     roomClosedReason = null;
     errorMessage = null;
     await _ensureConnected();
-    _send('create_room', const {});
+    _send('create_room', {
+      'name': name,
+    });
   }
 
-  Future<void> joinRoom(String code) async {
+  Future<void> joinRoom(String code, {required String name, bool spectator = false}) async {
     roomClosed = false;
     roomClosedReason = null;
     errorMessage = null;
     await _ensureConnected();
     _send('join_room', {
       'room_code': code.toUpperCase(),
+      'name': name,
+      'spectator': spectator,
     });
   }
 
@@ -57,11 +63,15 @@ class GameController extends ChangeNotifier {
     _send('join_room', {
       'room_code': roomCode,
       'player_id': playerId,
+      'spectator': isSpectator,
     });
   }
 
   void sendMove(int cell) {
     if (roomCode == null || playerId == null) {
+      return;
+    }
+    if (isSpectator) {
       return;
     }
     if (!isConnected) {
@@ -80,6 +90,7 @@ class GameController extends ChangeNotifier {
     roomCode = null;
     playerId = null;
     symbol = null;
+    role = null;
     state = null;
     roomClosed = false;
     roomClosedReason = null;
@@ -167,7 +178,9 @@ class GameController extends ChangeNotifier {
         _applyState(payload);
         break;
       case 'player_left':
-        errorMessage = 'Adversaire deconnecte. Il a 1 minute pour revenir.';
+        errorMessage = isSpectator
+            ? 'Joueur deconnecte. Il a 1 minute pour revenir.'
+            : 'Adversaire deconnecte. Il a 1 minute pour revenir.';
         break;
       case 'room_closed':
         roomClosed = true;
@@ -187,7 +200,14 @@ class GameController extends ChangeNotifier {
   void _applyRoomResponse(Map<String, dynamic> payload) {
     roomCode = payload['room_code'] as String? ?? roomCode;
     playerId = payload['player_id'] as String? ?? playerId;
-    symbol = payload['symbol'] as String? ?? symbol;
+    final incomingSymbol = payload['symbol'] as String?;
+    if (incomingSymbol != null && incomingSymbol.isNotEmpty) {
+      symbol = incomingSymbol;
+    }
+    role = payload['role'] as String? ?? role;
+    if (role == 'spectator') {
+      symbol = null;
+    }
 
     final stateJson = payload['state'] as Map<String, dynamic>?;
     if (stateJson != null) {
@@ -197,6 +217,22 @@ class GameController extends ChangeNotifier {
 
   void _applyState(Map<String, dynamic> payload) {
     state = GameState.fromJson(payload);
+  }
+
+  void requestRematch() {
+    if (roomCode == null || playerId == null) {
+      return;
+    }
+    if (isSpectator) {
+      return;
+    }
+    if (!isConnected) {
+      return;
+    }
+    _send('rematch', {
+      'room_code': roomCode,
+      'player_id': playerId,
+    });
   }
 
   void _setError(String message) {

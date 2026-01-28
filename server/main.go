@@ -19,8 +19,8 @@ import (
 )
 
 const (
-  symbolX = "X"
-  symbolO = "O"
+	symbolX = "X"
+	symbolO = "O"
 )
 
 const (
@@ -41,13 +41,13 @@ const (
 
 var winPatterns = [][]int{
 	{0, 1, 2},
-  {3, 4, 5},
-  {6, 7, 8},
-  {0, 3, 6},
-  {1, 4, 7},
-  {2, 5, 8},
-  {0, 4, 8},
-  {2, 4, 6},
+	{3, 4, 5},
+	{6, 7, 8},
+	{0, 3, 6},
+	{1, 4, 7},
+	{2, 5, 8},
+	{0, 4, 8},
+	{2, 4, 6},
 }
 
 var allowedOrigins = loadAllowedOrigins()
@@ -61,89 +61,104 @@ var upgrader = websocket.Upgrader{
 }
 
 type incomingMessage struct {
-  Type    string          `json:"type"`
-  Payload json.RawMessage `json:"payload"`
+	Type    string          `json:"type"`
+	Payload json.RawMessage `json:"payload"`
 }
 
 type outgoingMessage struct {
-  Type    string          `json:"type"`
-  Payload json.RawMessage `json:"payload,omitempty"`
+	Type    string          `json:"type"`
+	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
-type createRoomPayload struct{}
+type createRoomPayload struct {
+	Name string `json:"name"`
+}
 
 type joinRoomPayload struct {
-  RoomCode string `json:"room_code"`
-  PlayerID string `json:"player_id,omitempty"`
+	RoomCode  string `json:"room_code"`
+	PlayerID  string `json:"player_id,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Spectator bool   `json:"spectator,omitempty"`
 }
 
 type movePayload struct {
-  RoomCode string `json:"room_code"`
-  PlayerID string `json:"player_id"`
-  Cell     int    `json:"cell"`
+	RoomCode string `json:"room_code"`
+	PlayerID string `json:"player_id"`
+	Cell     int    `json:"cell"`
+}
+
+type rematchPayload struct {
+	RoomCode string `json:"room_code"`
+	PlayerID string `json:"player_id"`
 }
 
 type errorPayload struct {
-  Message string `json:"message"`
+	Message string `json:"message"`
 }
 
 type roomResponsePayload struct {
-  RoomCode    string       `json:"room_code"`
-  PlayerID    string       `json:"player_id"`
-  Symbol      string       `json:"symbol"`
-  Reconnected bool         `json:"reconnected"`
-  State       statePayload `json:"state"`
+	RoomCode    string       `json:"room_code"`
+	PlayerID    string       `json:"player_id"`
+	Symbol      string       `json:"symbol"`
+	Role        string       `json:"role"`
+	Reconnected bool         `json:"reconnected"`
+	State       statePayload `json:"state"`
 }
 
 type playerInfo struct {
-  ID        string `json:"id"`
-  Connected bool   `json:"connected"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Connected bool   `json:"connected"`
 }
 
 type statePayload struct {
-  RoomCode string                `json:"room_code"`
-  Board    []string              `json:"board"`
-  Turn     string                `json:"turn"`
-  Status   string                `json:"status"`
-  Winner   string                `json:"winner"`
-  Players  map[string]playerInfo `json:"players"`
+	RoomCode string                `json:"room_code"`
+	Board    []string              `json:"board"`
+	Turn     string                `json:"turn"`
+	Status   string                `json:"status"`
+	Winner   string                `json:"winner"`
+	Players  map[string]playerInfo `json:"players"`
 }
 
 type playerLeftPayload struct {
-  PlayerID string `json:"player_id"`
+	PlayerID string `json:"player_id"`
 }
 
 type roomClosedPayload struct {
-  Reason string `json:"reason"`
+	Reason string `json:"reason"`
 }
 
 type Player struct {
-  id               string
-  symbol           string
-  conn             *websocket.Conn
-  connected        bool
-  sendMu           sync.Mutex
-  disconnectTimer  *time.Timer
-  disconnectReason string
+	id               string
+	name             string
+	symbol           string
+	spectator        bool
+	conn             *websocket.Conn
+	connected        bool
+	sendMu           sync.Mutex
+	disconnectTimer  *time.Timer
+	disconnectReason string
 }
 
 type Room struct {
-  code   string
-  board  [9]string
-  turn   string
-  winner string
-  draw   bool
+	code           string
+	board          [9]string
+	turn           string
+	startingSymbol string
+	winner         string
+	draw           bool
 
-  playerX *Player
-  playerO *Player
+	playerX    *Player
+	playerO    *Player
+	spectators map[string]*Player
 
-  closed bool
-  mu     sync.Mutex
+	closed bool
+	mu     sync.Mutex
 }
 
 type Server struct {
-  rooms map[string]*Room
-  mu    sync.RWMutex
+	rooms map[string]*Room
+	mu    sync.RWMutex
 }
 
 type Session struct {
@@ -153,32 +168,32 @@ type Session struct {
 }
 
 func main() {
-  addr := envOr("ADDR", ":8080")
-  webDir := resolveWebDir()
+	addr := envOr("ADDR", ":8080")
+	webDir := resolveWebDir()
 
-  srv := NewServer()
-  mux := http.NewServeMux()
-  mux.HandleFunc("/ws", srv.handleWS)
-  mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-    w.WriteHeader(http.StatusOK)
-    _, _ = w.Write([]byte("ok"))
-  })
+	srv := NewServer()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ws", srv.handleWS)
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
 
-  if webDir != "" {
-    mux.Handle("/", spaHandler(webDir))
-    log.Printf("serving web from %s", webDir)
-  } else {
-    log.Printf("no web directory found, only websocket available")
-  }
+	if webDir != "" {
+		mux.Handle("/", spaHandler(webDir))
+		log.Printf("serving web from %s", webDir)
+	} else {
+		log.Printf("no web directory found, only websocket available")
+	}
 
-  log.Printf("listening on %s", addr)
-  if err := http.ListenAndServe(addr, mux); err != nil {
-    log.Fatal(err)
-  }
+	log.Printf("listening on %s", addr)
+	if err := http.ListenAndServe(addr, mux); err != nil {
+		log.Fatal(err)
+	}
 }
 
 func NewServer() *Server {
-  return &Server{rooms: make(map[string]*Room)}
+	return &Server{rooms: make(map[string]*Room)}
 }
 
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
@@ -223,61 +238,75 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 
-    switch msg.Type {
-	case "create_room":
-		room, player := s.createRoom(conn)
-		session.set(room, player)
+		switch msg.Type {
+		case "create_room":
+			var payload createRoomPayload
+			_ = json.Unmarshal(msg.Payload, &payload)
+			room, player := s.createRoom(conn, payload.Name)
+			session.set(room, player)
 
-		payload := roomResponsePayload{
-			RoomCode:    room.code,
-			PlayerID:    player.id,
-        Symbol:      player.symbol,
-        Reconnected: false,
-        State:       room.snapshot(),
-      }
-      _ = player.send(newMessage("room_created", payload))
+			response := roomResponsePayload{
+				RoomCode:    room.code,
+				PlayerID:    player.id,
+				Symbol:      player.symbol,
+				Role:        roleLabel(player),
+				Reconnected: false,
+				State:       room.snapshot(),
+			}
+			_ = player.send(newMessage("room_created", response))
 
-	case "join_room":
-      var payload joinRoomPayload
-      if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-        sendError(conn, "invalid join_room payload")
-        continue
-      }
+		case "join_room":
+			var payload joinRoomPayload
+			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+				sendError(conn, "invalid join_room payload")
+				continue
+			}
 
-      room, player, reconnected, err := s.joinRoom(conn, payload.RoomCode, payload.PlayerID)
-      if err != nil {
-        sendError(conn, err.Error())
-        continue
-      }
+			room, player, reconnected, err := s.joinRoom(conn, payload.RoomCode, payload.PlayerID, payload.Name, payload.Spectator)
+			if err != nil {
+				sendError(conn, err.Error())
+				continue
+			}
 
-		session.set(room, player)
+			session.set(room, player)
 
-      response := roomResponsePayload{
-        RoomCode:    room.code,
-        PlayerID:    player.id,
-        Symbol:      player.symbol,
-        Reconnected: reconnected,
-        State:       room.snapshot(),
-      }
-      _ = player.send(newMessage("room_joined", response))
+			response := roomResponsePayload{
+				RoomCode:    room.code,
+				PlayerID:    player.id,
+				Symbol:      player.symbol,
+				Role:        roleLabel(player),
+				Reconnected: reconnected,
+				State:       room.snapshot(),
+			}
+			_ = player.send(newMessage("room_joined", response))
 
-      s.broadcastState(room)
+			s.broadcastState(room)
 
-    case "move":
-      var payload movePayload
-      if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-        sendError(conn, "invalid move payload")
-        continue
-      }
+		case "move":
+			var payload movePayload
+			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+				sendError(conn, "invalid move payload")
+				continue
+			}
 
-      if err := s.applyMove(payload); err != nil {
-        sendError(conn, err.Error())
-        continue
-      }
-    default:
-      sendError(conn, "unknown message type")
-    }
-  }
+			if err := s.applyMove(payload); err != nil {
+				sendError(conn, err.Error())
+				continue
+			}
+		case "rematch":
+			var payload rematchPayload
+			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+				sendError(conn, "invalid rematch payload")
+				continue
+			}
+			if err := s.rematch(payload); err != nil {
+				sendError(conn, err.Error())
+				continue
+			}
+		default:
+			sendError(conn, "unknown message type")
+		}
+	}
 
 	room, player := session.get()
 	if room != nil && player != nil {
@@ -285,351 +314,461 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) createRoom(conn *websocket.Conn) (*Room, *Player) {
-  code := s.uniqueRoomCode()
-  player := &Player{
-    id:        randomID(),
-    symbol:    symbolX,
-    conn:      conn,
-    connected: true,
-  }
+func (s *Server) createRoom(conn *websocket.Conn, name string) (*Room, *Player) {
+	code := s.uniqueRoomCode()
+	player := &Player{
+		id:        randomID(),
+		name:      sanitizeName(name, "Joueur X"),
+		symbol:    symbolX,
+		conn:      conn,
+		connected: true,
+	}
 
-  room := &Room{
-    code:    code,
-    turn:    symbolX,
-    playerX: player,
-  }
+	room := &Room{
+		code:           code,
+		turn:           symbolX,
+		startingSymbol: symbolX,
+		playerX:        player,
+		spectators:     make(map[string]*Player),
+	}
 
-  s.mu.Lock()
-  s.rooms[code] = room
-  s.mu.Unlock()
+	s.mu.Lock()
+	s.rooms[code] = room
+	s.mu.Unlock()
 
-  return room, player
+	return room, player
 }
 
-func (s *Server) joinRoom(conn *websocket.Conn, code, playerID string) (*Room, *Player, bool, error) {
-  room := s.getRoom(code)
-  if room == nil {
-    return nil, nil, false, errors.New("room not found")
-  }
+func (s *Server) joinRoom(conn *websocket.Conn, code, playerID, name string, spectator bool) (*Room, *Player, bool, error) {
+	room := s.getRoom(code)
+	if room == nil {
+		return nil, nil, false, errors.New("room not found")
+	}
 
-  room.mu.Lock()
-  defer room.mu.Unlock()
+	room.mu.Lock()
+	defer room.mu.Unlock()
 
-  if room.closed {
-    return nil, nil, false, errors.New("room is closed")
-  }
+	if room.closed {
+		return nil, nil, false, errors.New("room is closed")
+	}
 
-  if playerID != "" {
-    if room.playerX != nil && room.playerX.id == playerID {
-      if room.playerX.connected {
-        return nil, nil, false, errors.New("player already connected")
-      }
-      attachPlayer(room.playerX, conn)
-      return room, room.playerX, true, nil
-    }
+	if spectator {
+		return joinSpectator(room, conn, playerID, name)
+	}
 
-    if room.playerO != nil && room.playerO.id == playerID {
-      if room.playerO.connected {
-        return nil, nil, false, errors.New("player already connected")
-      }
-      attachPlayer(room.playerO, conn)
-      return room, room.playerO, true, nil
-    }
-  }
+	if playerID != "" {
+		if room.playerX != nil && room.playerX.id == playerID {
+			if room.playerX.connected {
+				return nil, nil, false, errors.New("player already connected")
+			}
+			attachPlayer(room.playerX, conn)
+			if name != "" {
+				room.playerX.name = sanitizeName(name, room.playerX.name)
+			}
+			return room, room.playerX, true, nil
+		}
 
-  if room.playerO != nil {
-    return nil, nil, false, errors.New("room already full")
-  }
+		if room.playerO != nil && room.playerO.id == playerID {
+			if room.playerO.connected {
+				return nil, nil, false, errors.New("player already connected")
+			}
+			attachPlayer(room.playerO, conn)
+			if name != "" {
+				room.playerO.name = sanitizeName(name, room.playerO.name)
+			}
+			return room, room.playerO, true, nil
+		}
+	}
 
-  player := &Player{
-    id:        randomID(),
-    symbol:    symbolO,
-    conn:      conn,
-    connected: true,
-  }
-  room.playerO = player
+	if room.playerO != nil {
+		return nil, nil, false, errors.New("room already full")
+	}
 
-  return room, player, false, nil
+	player := &Player{
+		id:        randomID(),
+		name:      sanitizeName(name, "Joueur O"),
+		symbol:    symbolO,
+		conn:      conn,
+		connected: true,
+	}
+	room.playerO = player
+
+	return room, player, false, nil
+}
+
+func joinSpectator(room *Room, conn *websocket.Conn, spectatorID, name string) (*Room, *Player, bool, error) {
+	if room.spectators == nil {
+		room.spectators = make(map[string]*Player)
+	}
+
+	if spectatorID != "" {
+		if spectator, ok := room.spectators[spectatorID]; ok {
+			if spectator.connected {
+				return nil, nil, false, errors.New("spectator already connected")
+			}
+			attachPlayer(spectator, conn)
+			if name != "" {
+				spectator.name = sanitizeName(name, spectator.name)
+			}
+			return room, spectator, true, nil
+		}
+	}
+
+	spectator := &Player{
+		id:        randomID(),
+		name:      sanitizeName(name, "Spectateur"),
+		spectator: true,
+		conn:      conn,
+		connected: true,
+	}
+	room.spectators[spectator.id] = spectator
+
+	return room, spectator, false, nil
 }
 
 func (s *Server) applyMove(payload movePayload) error {
-  room := s.getRoom(payload.RoomCode)
-  if room == nil {
-    return errors.New("room not found")
-  }
+	room := s.getRoom(payload.RoomCode)
+	if room == nil {
+		return errors.New("room not found")
+	}
 
-  state, players, err := room.applyMove(payload)
-  if err != nil {
-    return err
-  }
+	state, recipients, err := room.applyMove(payload)
+	if err != nil {
+		return err
+	}
 
-  msg := newMessage("state", state)
-  for _, player := range players {
-    _ = player.send(msg)
-  }
+	msg := newMessage("state", state)
+	for _, client := range recipients {
+		_ = client.send(msg)
+	}
 
-  return nil
+	return nil
+}
+
+func (s *Server) rematch(payload rematchPayload) error {
+	room := s.getRoom(payload.RoomCode)
+	if room == nil {
+		return errors.New("room not found")
+	}
+
+	room.mu.Lock()
+	if room.closed {
+		room.mu.Unlock()
+		return errors.New("room is closed")
+	}
+
+	player := room.playerByID(payload.PlayerID)
+	if player == nil {
+		room.mu.Unlock()
+		return errors.New("player not found in room")
+	}
+
+	if !playerConnected(room.playerX) || !playerConnected(room.playerO) {
+		room.mu.Unlock()
+		return errors.New("waiting for opponent")
+	}
+
+	if room.winner == "" && !room.draw {
+		room.mu.Unlock()
+		return errors.New("game not finished")
+	}
+
+	room.resetGameLocked()
+	room.mu.Unlock()
+
+	s.broadcastState(room)
+	return nil
 }
 
 func (s *Server) handleDisconnect(room *Room, player *Player) {
-  room.mu.Lock()
-  if room.closed {
-    room.mu.Unlock()
-    return
-  }
+	room.mu.Lock()
+	if room.closed {
+		room.mu.Unlock()
+		return
+	}
 
-  if !player.connected {
-    room.mu.Unlock()
-    return
-  }
+	if !player.connected {
+		room.mu.Unlock()
+		return
+	}
 
-  player.connected = false
-  if player.conn != nil {
-    _ = player.conn.Close()
-    player.conn = nil
-  }
+	player.connected = false
+	if player.conn != nil {
+		_ = player.conn.Close()
+		player.conn = nil
+	}
 
-  if player.disconnectTimer == nil {
-    player.disconnectTimer = time.AfterFunc(time.Minute, func() {
-      s.closeRoom(room, "timeout")
-    })
-  }
+	if player.spectator {
+		if room.spectators != nil {
+			delete(room.spectators, player.id)
+		}
+		room.mu.Unlock()
+		s.broadcastState(room)
+		return
+	}
 
-  bothDisconnected := !playerConnected(room.playerX) && !playerConnected(room.playerO)
-  room.mu.Unlock()
+	if player.disconnectTimer == nil {
+		player.disconnectTimer = time.AfterFunc(time.Minute, func() {
+			s.closeRoom(room, "timeout")
+		})
+	}
 
-  if bothDisconnected {
-    s.closeRoom(room, "both_left")
-    return
-  }
+	bothDisconnected := !playerConnected(room.playerX) && !playerConnected(room.playerO)
+	room.mu.Unlock()
 
-  s.sendToRoom(room, newMessage("player_left", playerLeftPayload{PlayerID: player.id}))
-  s.broadcastState(room)
+	if bothDisconnected {
+		s.closeRoom(room, "both_left")
+		return
+	}
+
+	s.sendToRoom(room, newMessage("player_left", playerLeftPayload{PlayerID: player.id}))
+	s.broadcastState(room)
 }
 
 func (s *Server) closeRoom(room *Room, reason string) {
-  room.mu.Lock()
-  if room.closed {
-    room.mu.Unlock()
-    return
-  }
-  room.closed = true
+	room.mu.Lock()
+	if room.closed {
+		room.mu.Unlock()
+		return
+	}
+	room.closed = true
 
-  players := []*Player{room.playerX, room.playerO}
-  room.mu.Unlock()
+	players := []*Player{room.playerX, room.playerO}
+	for _, spectator := range room.spectators {
+		players = append(players, spectator)
+	}
+	room.mu.Unlock()
 
-  msg := newMessage("room_closed", roomClosedPayload{Reason: reason})
-  for _, player := range players {
-    if player == nil {
-      continue
-    }
-    if player.disconnectTimer != nil {
-      player.disconnectTimer.Stop()
-      player.disconnectTimer = nil
-    }
-    if player.connected {
-      _ = player.send(msg)
-      if player.conn != nil {
-        _ = player.conn.Close()
-      }
-      player.connected = false
-    }
-  }
+	msg := newMessage("room_closed", roomClosedPayload{Reason: reason})
+	for _, player := range players {
+		if player == nil {
+			continue
+		}
+		if player.disconnectTimer != nil {
+			player.disconnectTimer.Stop()
+			player.disconnectTimer = nil
+		}
+		if player.connected {
+			_ = player.send(msg)
+			if player.conn != nil {
+				_ = player.conn.Close()
+			}
+			player.connected = false
+		}
+	}
 
-  s.mu.Lock()
-  delete(s.rooms, room.code)
-  s.mu.Unlock()
+	s.mu.Lock()
+	delete(s.rooms, room.code)
+	s.mu.Unlock()
 }
 
 func (s *Server) sendToRoom(room *Room, msg outgoingMessage) {
-  state, players := room.snapshotWithPlayers()
-  _ = state
-  for _, player := range players {
-    _ = player.send(msg)
-  }
+	state, recipients := room.snapshotWithPlayers()
+	_ = state
+	for _, client := range recipients {
+		_ = client.send(msg)
+	}
 }
 
 func (s *Server) broadcastState(room *Room) {
-  state, players := room.snapshotWithPlayers()
-  msg := newMessage("state", state)
-  for _, player := range players {
-    _ = player.send(msg)
-  }
+	state, recipients := room.snapshotWithPlayers()
+	msg := newMessage("state", state)
+	for _, client := range recipients {
+		_ = client.send(msg)
+	}
 }
 
 func (r *Room) applyMove(payload movePayload) (statePayload, []*Player, error) {
-  r.mu.Lock()
-  defer r.mu.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
-  if r.closed {
-    return statePayload{}, nil, errors.New("room is closed")
-  }
+	if r.closed {
+		return statePayload{}, nil, errors.New("room is closed")
+	}
 
-  if payload.Cell < 0 || payload.Cell > 8 {
-    return statePayload{}, nil, errors.New("invalid cell")
-  }
+	if payload.Cell < 0 || payload.Cell > 8 {
+		return statePayload{}, nil, errors.New("invalid cell")
+	}
 
-  player := r.playerByID(payload.PlayerID)
-  if player == nil {
-    return statePayload{}, nil, errors.New("player not found in room")
-  }
+	player := r.playerByID(payload.PlayerID)
+	if player == nil {
+		return statePayload{}, nil, errors.New("player not found in room")
+	}
 
-  if !player.connected {
-    return statePayload{}, nil, errors.New("player disconnected")
-  }
+	if !player.connected {
+		return statePayload{}, nil, errors.New("player disconnected")
+	}
 
-  if !playerConnected(r.playerX) || !playerConnected(r.playerO) {
-    return statePayload{}, nil, errors.New("waiting for opponent")
-  }
+	if !playerConnected(r.playerX) || !playerConnected(r.playerO) {
+		return statePayload{}, nil, errors.New("waiting for opponent")
+	}
 
-  if r.winner != "" || r.draw {
-    return statePayload{}, nil, errors.New("game already finished")
-  }
+	if r.winner != "" || r.draw {
+		return statePayload{}, nil, errors.New("game already finished")
+	}
 
-  if r.turn != player.symbol {
-    return statePayload{}, nil, errors.New("not your turn")
-  }
+	if r.turn != player.symbol {
+		return statePayload{}, nil, errors.New("not your turn")
+	}
 
-  if r.board[payload.Cell] != "" {
-    return statePayload{}, nil, errors.New("cell already taken")
-  }
+	if r.board[payload.Cell] != "" {
+		return statePayload{}, nil, errors.New("cell already taken")
+	}
 
-  r.board[payload.Cell] = player.symbol
+	r.board[payload.Cell] = player.symbol
 
-  if winner := r.checkWinner(); winner != "" {
-    r.winner = winner
-  } else if r.checkDraw() {
-    r.draw = true
-  } else {
-    r.turn = otherSymbol(r.turn)
-  }
+	if winner := r.checkWinner(); winner != "" {
+		r.winner = winner
+	} else if r.checkDraw() {
+		r.draw = true
+	} else {
+		r.turn = otherSymbol(r.turn)
+	}
 
-  state := r.snapshotLocked()
-  players := r.connectedPlayersLocked()
+	state := r.snapshotLocked()
+	recipients := r.connectedClientsLocked()
 
-  return state, players, nil
+	return state, recipients, nil
 }
 
 func (r *Room) snapshot() statePayload {
-  r.mu.Lock()
-  defer r.mu.Unlock()
-  return r.snapshotLocked()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.snapshotLocked()
 }
 
 func (r *Room) snapshotWithPlayers() (statePayload, []*Player) {
-  r.mu.Lock()
-  defer r.mu.Unlock()
-  return r.snapshotLocked(), r.connectedPlayersLocked()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.snapshotLocked(), r.connectedClientsLocked()
 }
 
 func (r *Room) snapshotLocked() statePayload {
-  board := make([]string, 9)
-  copy(board, r.board[:])
+	board := make([]string, 9)
+	copy(board, r.board[:])
 
-  status := statusWaiting
-  if r.winner != "" {
-    status = statusWin
-  } else if r.draw {
-    status = statusDraw
-  } else if r.playerX == nil || r.playerO == nil {
-    status = statusWaiting
-  } else if !playerConnected(r.playerX) || !playerConnected(r.playerO) {
-    status = statusPaused
-  } else {
-    status = statusInProgress
-  }
+	status := statusWaiting
+	if r.winner != "" {
+		status = statusWin
+	} else if r.draw {
+		status = statusDraw
+	} else if r.playerX == nil || r.playerO == nil {
+		status = statusWaiting
+	} else if !playerConnected(r.playerX) || !playerConnected(r.playerO) {
+		status = statusPaused
+	} else {
+		status = statusInProgress
+	}
 
-  players := make(map[string]playerInfo)
-  if r.playerX != nil {
-    players[symbolX] = playerInfo{ID: r.playerX.id, Connected: r.playerX.connected}
-  }
-  if r.playerO != nil {
-    players[symbolO] = playerInfo{ID: r.playerO.id, Connected: r.playerO.connected}
-  }
+	players := make(map[string]playerInfo)
+	if r.playerX != nil {
+		players[symbolX] = playerInfo{ID: r.playerX.id, Name: r.playerX.name, Connected: r.playerX.connected}
+	}
+	if r.playerO != nil {
+		players[symbolO] = playerInfo{ID: r.playerO.id, Name: r.playerO.name, Connected: r.playerO.connected}
+	}
 
-  return statePayload{
-    RoomCode: r.code,
-    Board:    board,
-    Turn:     r.turn,
-    Status:   status,
-    Winner:   r.winner,
-    Players:  players,
-  }
+	return statePayload{
+		RoomCode: r.code,
+		Board:    board,
+		Turn:     r.turn,
+		Status:   status,
+		Winner:   r.winner,
+		Players:  players,
+	}
 }
 
-func (r *Room) connectedPlayersLocked() []*Player {
-  players := []*Player{}
-  if playerConnected(r.playerX) {
-    players = append(players, r.playerX)
-  }
-  if playerConnected(r.playerO) {
-    players = append(players, r.playerO)
-  }
-  return players
+func (r *Room) connectedClientsLocked() []*Player {
+	clients := []*Player{}
+	if playerConnected(r.playerX) {
+		clients = append(clients, r.playerX)
+	}
+	if playerConnected(r.playerO) {
+		clients = append(clients, r.playerO)
+	}
+	for _, spectator := range r.spectators {
+		if playerConnected(spectator) {
+			clients = append(clients, spectator)
+		}
+	}
+	return clients
 }
 
 func (r *Room) playerByID(id string) *Player {
-  if r.playerX != nil && r.playerX.id == id {
-    return r.playerX
-  }
-  if r.playerO != nil && r.playerO.id == id {
-    return r.playerO
-  }
-  return nil
+	if r.playerX != nil && r.playerX.id == id {
+		return r.playerX
+	}
+	if r.playerO != nil && r.playerO.id == id {
+		return r.playerO
+	}
+	return nil
 }
 
 func (r *Room) checkWinner() string {
-  for _, pattern := range winPatterns {
-    first := r.board[pattern[0]]
-    if first == "" {
-      continue
-    }
-    if first == r.board[pattern[1]] && first == r.board[pattern[2]] {
-      return first
-    }
-  }
-  return ""
+	for _, pattern := range winPatterns {
+		first := r.board[pattern[0]]
+		if first == "" {
+			continue
+		}
+		if first == r.board[pattern[1]] && first == r.board[pattern[2]] {
+			return first
+		}
+	}
+	return ""
 }
 
 func (r *Room) checkDraw() bool {
-  for _, cell := range r.board {
-    if cell == "" {
-      return false
-    }
-  }
-  return true
+	for _, cell := range r.board {
+		if cell == "" {
+			return false
+		}
+	}
+	return true
+}
+
+func (r *Room) resetGameLocked() {
+	for i := range r.board {
+		r.board[i] = ""
+	}
+	if r.startingSymbol == "" {
+		r.startingSymbol = symbolX
+	} else {
+		r.startingSymbol = otherSymbol(r.startingSymbol)
+	}
+	r.turn = r.startingSymbol
+	r.winner = ""
+	r.draw = false
 }
 
 func attachPlayer(player *Player, conn *websocket.Conn) {
-  player.conn = conn
-  player.connected = true
-  if player.disconnectTimer != nil {
-    player.disconnectTimer.Stop()
-    player.disconnectTimer = nil
-  }
+	player.conn = conn
+	player.connected = true
+	if player.disconnectTimer != nil {
+		player.disconnectTimer.Stop()
+		player.disconnectTimer = nil
+	}
 }
 
 func playerConnected(player *Player) bool {
-  return player != nil && player.connected && player.conn != nil
+	return player != nil && player.connected && player.conn != nil
 }
 
 func (s *Server) uniqueRoomCode() string {
-  for {
-    code := randomRoomCode()
-    s.mu.RLock()
-    _, exists := s.rooms[code]
-    s.mu.RUnlock()
-    if !exists {
-      return code
-    }
-  }
+	for {
+		code := randomRoomCode()
+		s.mu.RLock()
+		_, exists := s.rooms[code]
+		s.mu.RUnlock()
+		if !exists {
+			return code
+		}
+	}
 }
 
 func (s *Server) getRoom(code string) *Room {
-  s.mu.RLock()
-  defer s.mu.RUnlock()
-  return s.rooms[strings.ToUpper(code)]
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.rooms[strings.ToUpper(code)]
 }
 
 func (p *Player) send(msg outgoingMessage) error {
@@ -653,22 +792,45 @@ func (p *Player) sendPing() error {
 }
 
 func newMessage(msgType string, payload any) outgoingMessage {
-  if payload == nil {
-    return outgoingMessage{Type: msgType}
-  }
-  data, _ := json.Marshal(payload)
-  return outgoingMessage{Type: msgType, Payload: data}
+	if payload == nil {
+		return outgoingMessage{Type: msgType}
+	}
+	data, _ := json.Marshal(payload)
+	return outgoingMessage{Type: msgType, Payload: data}
 }
 
 func sendError(conn *websocket.Conn, msg string) {
-  _ = conn.WriteJSON(newMessage("error", errorPayload{Message: msg}))
+	_ = conn.WriteJSON(newMessage("error", errorPayload{Message: msg}))
 }
 
 func otherSymbol(symbol string) string {
-  if symbol == symbolX {
-    return symbolO
-  }
-  return symbolX
+	if symbol == symbolX {
+		return symbolO
+	}
+	return symbolX
+}
+
+func roleLabel(player *Player) string {
+	if player == nil {
+		return ""
+	}
+	if player.spectator {
+		return "spectator"
+	}
+	return "player"
+}
+
+func sanitizeName(name, fallback string) string {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return fallback
+	}
+	const maxRunes = 20
+	runes := []rune(trimmed)
+	if len(runes) > maxRunes {
+		return string(runes[:maxRunes])
+	}
+	return trimmed
 }
 
 func randomRoomCode() string {
@@ -684,55 +846,55 @@ func randomRoomCode() string {
 }
 
 func randomID() string {
-  bytes := make([]byte, 8)
-  if _, err := rand.Read(bytes); err != nil {
-    return fmt.Sprintf("%d", time.Now().UnixNano())
-  }
-  return hex.EncodeToString(bytes)
+	bytes := make([]byte, 8)
+	if _, err := rand.Read(bytes); err != nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(bytes)
 }
 
 func envOr(key, fallback string) string {
-  if value := os.Getenv(key); value != "" {
-    return value
-  }
-  return fallback
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return fallback
 }
 
 func resolveWebDir() string {
-  if custom := os.Getenv("WEB_DIR"); custom != "" {
-    if dirExists(custom) {
-      return custom
-    }
-  }
+	if custom := os.Getenv("WEB_DIR"); custom != "" {
+		if dirExists(custom) {
+			return custom
+		}
+	}
 
-  candidates := []string{
-    "../build/web",
-    "./web",
-  }
-  for _, candidate := range candidates {
-    if dirExists(candidate) {
-      return candidate
-    }
-  }
-  return ""
+	candidates := []string{
+		"../build/web",
+		"./web",
+	}
+	for _, candidate := range candidates {
+		if dirExists(candidate) {
+			return candidate
+		}
+	}
+	return ""
 }
 
 func dirExists(path string) bool {
-  info, err := os.Stat(path)
-  return err == nil && info.IsDir()
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 func spaHandler(staticPath string) http.Handler {
-  fileServer := http.FileServer(http.Dir(staticPath))
-  return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    path := filepath.Join(staticPath, filepath.Clean(r.URL.Path))
-    if info, err := os.Stat(path); err == nil && !info.IsDir() {
-      fileServer.ServeHTTP(w, r)
-      return
-    }
-    r.URL.Path = "/"
-    fileServer.ServeHTTP(w, r)
-  })
+	fileServer := http.FileServer(http.Dir(staticPath))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := filepath.Join(staticPath, filepath.Clean(r.URL.Path))
+		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+			fileServer.ServeHTTP(w, r)
+			return
+		}
+		r.URL.Path = "/"
+		fileServer.ServeHTTP(w, r)
+	})
 }
 
 func loadAllowedOrigins() map[string]struct{} {

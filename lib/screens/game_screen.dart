@@ -29,17 +29,20 @@ class GameScreen extends StatelessWidget {
 
     switch (state.status) {
       case GameStatus.waiting:
-        return 'En attente d\'un adversaire';
+        return controller.isSpectator ? 'En attente de joueurs' : 'En attente d\'un adversaire';
       case GameStatus.paused:
-        return 'Adversaire deconnecte';
+        return controller.isSpectator ? 'Joueur deconnecte' : 'Adversaire deconnecte';
       case GameStatus.win:
-        if (state.winner.isEmpty) {
+        if (controller.isSpectator || state.winner.isEmpty) {
           return 'Partie terminee';
         }
         return state.winner == controller.symbol ? 'Victoire !' : 'Defaite';
       case GameStatus.draw:
         return 'Match nul';
       case GameStatus.inProgress:
+        if (controller.isSpectator) {
+          return 'Partie en cours';
+        }
         return state.turn == controller.symbol ? 'A ton tour' : 'Tour adverse';
     }
   }
@@ -56,6 +59,12 @@ class GameScreen extends StatelessWidget {
         final board = state?.board ?? List.filled(9, '');
         final youConnected = state?.isPlayerConnected(symbol) ?? controller.isConnected;
         final opponentConnected = state?.isPlayerConnected(opponentSymbol) ?? false;
+        final playerXName = state?.playerName('X') ?? '';
+        final playerOName = state?.playerName('O') ?? '';
+        final youName = state?.playerName(symbol) ?? '';
+        final opponentName = state?.playerName(opponentSymbol) ?? '';
+        final bothPlayersConnected = (state?.isPlayerConnected('X') ?? false) &&
+            (state?.isPlayerConnected('O') ?? false);
 
         return AppBackground(
           child: SafeArea(
@@ -109,18 +118,26 @@ class GameScreen extends StatelessWidget {
                     children: [
                       Expanded(
                         child: PlayerStatusCard(
-                          label: 'Toi',
+                          label: controller.isSpectator
+                              ? (playerXName.isNotEmpty ? playerXName : 'Joueur X')
+                              : (youName.isNotEmpty ? 'Toi · $youName' : 'Toi'),
                           symbol: symbol,
-                          connected: youConnected,
+                          connected: controller.isSpectator
+                              ? state?.isPlayerConnected('X') ?? false
+                              : youConnected,
                           highlight: AppColors.accentGreen,
                         ),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: PlayerStatusCard(
-                          label: 'Adversaire',
-                          symbol: opponentSymbol,
-                          connected: opponentConnected,
+                          label: controller.isSpectator
+                              ? (playerOName.isNotEmpty ? playerOName : 'Joueur O')
+                              : (opponentName.isNotEmpty ? opponentName : 'Adversaire'),
+                          symbol: controller.isSpectator ? 'O' : opponentSymbol,
+                          connected: controller.isSpectator
+                              ? state?.isPlayerConnected('O') ?? false
+                              : opponentConnected,
                           highlight: AppColors.accentRed,
                         ),
                       ),
@@ -172,6 +189,9 @@ class GameScreen extends StatelessWidget {
                                 if (state == null) {
                                   return;
                                 }
+                                if (controller.isSpectator) {
+                                  return;
+                                }
                                 if (state.status != GameStatus.inProgress) {
                                   return;
                                 }
@@ -190,6 +210,21 @@ class GameScreen extends StatelessWidget {
                     },
                   ),
                   const SizedBox(height: 18),
+                  if (state?.isFinished == true &&
+                      bothPlayersConnected &&
+                      !controller.roomClosed &&
+                      !controller.isSpectator)
+                    SoftButton(
+                      label: 'Rejouer',
+                      onPressed: () {
+                        controller.requestRematch();
+                      },
+                    ),
+                  if (state?.isFinished == true &&
+                      bothPlayersConnected &&
+                      !controller.roomClosed &&
+                      !controller.isSpectator)
+                    const SizedBox(height: 12),
                   if (controller.connectionStatus != ConnectionStatus.connected &&
                       !controller.roomClosed &&
                       controller.roomCode != null)
