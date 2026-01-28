@@ -8,9 +8,14 @@
 
     <div style="height: 12px;"></div>
 
-    <button class="muted small" style="background: none; border: none; cursor: pointer;" @click="copyCode">
-      Tap pour copier le code
-    </button>
+    <div class="row center" style="gap: 10px; flex-wrap: wrap;">
+      <button class="muted small" style="background: none; border: none; cursor: pointer;" @click="copyCode">
+        Copier le code
+      </button>
+      <button class="muted small" style="background: none; border: none; cursor: pointer;" @click="copyShareLink">
+        Copier le lien
+      </button>
+    </div>
 
     <div style="height: 16px;"></div>
 
@@ -72,8 +77,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
-import { useRouter } from 'vue-router';
+import { computed, onMounted, watch } from 'vue';
+import { useRouter, useRoute } from 'vue-router';
 import CircleIconButton from '../components/CircleIconButton.vue';
 import PlayerStatusCard from '../components/PlayerStatusCard.vue';
 import BoardCell from '../components/BoardCell.vue';
@@ -81,6 +86,7 @@ import SoftButton from '../components/SoftButton.vue';
 import { useGame } from '../composables/useGame';
 
 const router = useRouter();
+const route = useRoute();
 const game = useGame();
 
 const roomCode = computed(() => game.state.roomCode || '----');
@@ -152,6 +158,13 @@ const statusText = computed(() => {
   }
 });
 
+const shareLink = computed(() => {
+  if (!game.state.roomCode || typeof window === 'undefined') {
+    return '';
+  }
+  return `${window.location.origin}/game?code=${encodeURIComponent(game.state.roomCode)}`;
+});
+
 const bothPlayersConnected = computed(() => isPlayerConnected('X') && isPlayerConnected('O'));
 const showRematch = computed(() => {
   const status = state.value?.status ?? '';
@@ -178,6 +191,17 @@ const copyCode = async (): Promise<void> => {
   }
 };
 
+const copyShareLink = async (): Promise<void> => {
+  if (!shareLink.value) {
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(shareLink.value);
+  } catch (error) {
+    // no-op
+  }
+};
+
 const handleMove = (index: number): void => {
   if (!state.value || isSpectator.value) {
     return;
@@ -193,4 +217,32 @@ const handleMove = (index: number): void => {
   }
   game.sendMove(index);
 };
+
+const redirectToJoinIfNeeded = (): void => {
+  if (game.state.roomCode) {
+    return;
+  }
+  const codeParam = route.query.code;
+  if (typeof codeParam !== 'string' || !codeParam.trim()) {
+    return;
+  }
+  const spectatorParam = route.query.spectator;
+  const spectator = spectatorParam === '1' || spectatorParam === 'true';
+  const query: Record<string, string> = { code: codeParam };
+  if (spectator) {
+    query.spectator = '1';
+  }
+  router.replace({ path: '/', query });
+};
+
+onMounted(() => {
+  redirectToJoinIfNeeded();
+});
+
+watch(
+  () => route.query.code,
+  () => {
+    redirectToJoinIfNeeded();
+  },
+);
 </script>

@@ -116,7 +116,7 @@
 
 <script setup lang="ts">
 import { ref, watch, onMounted } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRouter, useRoute } from 'vue-router';
 import CircleIconButton from '../components/CircleIconButton.vue';
 import SoftButton from '../components/SoftButton.vue';
 import GameLogo from '../components/GameLogo.vue';
@@ -126,6 +126,7 @@ import { useAuth } from '../composables/useAuth';
 import { useStats } from '../composables/useStats';
 
 const router = useRouter();
+const route = useRoute();
 const game = useGame();
 const auth = useAuth();
 const stats = useStats();
@@ -154,11 +155,41 @@ const openCreate = () => {
   showNameDialog.value = true;
 };
 
+const normalizeRoomCode = (code: string): string => {
+  return code.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+};
+
 const openJoin = (spectator: boolean): void => {
   joinSpectator.value = spectator;
   joinCode.value = '';
   joinName.value = getDefaultName();
   showJoinDialog.value = true;
+};
+
+const openJoinWithCode = (code: string, spectator: boolean): void => {
+  joinSpectator.value = spectator;
+  joinCode.value = normalizeRoomCode(code);
+  joinName.value = getDefaultName();
+  showJoinDialog.value = true;
+};
+
+const consumeShareParams = (): void => {
+  const codeParam = route.query.code;
+  if (typeof codeParam !== 'string' || !codeParam.trim()) {
+    return;
+  }
+  const spectatorParam = route.query.spectator;
+  const spectator = spectatorParam === '1' || spectatorParam === 'true';
+  if (showJoinDialog.value) {
+    joinSpectator.value = spectator;
+    joinCode.value = normalizeRoomCode(codeParam);
+  } else {
+    openJoinWithCode(codeParam, spectator);
+  }
+  const nextQuery = { ...route.query };
+  delete nextQuery.code;
+  delete nextQuery.spectator;
+  router.replace({ path: route.path, query: nextQuery });
 };
 
 const persistName = (name: string): void => {
@@ -193,7 +224,15 @@ onMounted(() => {
   if (auth.state.user) {
     stats.loadStats();
   }
+  consumeShareParams();
 });
+
+watch(
+  () => route.query.code,
+  () => {
+    consumeShareParams();
+  },
+);
 
 watch(
   () => auth.state.user,
