@@ -141,6 +141,17 @@ const createName = ref(lastName.value);
 const joinName = ref(lastName.value);
 const joinCode = ref('');
 
+const normalizeGuestName = (name: string): string => {
+  const trimmed = name.trim();
+  if (!trimmed || auth.state.user) {
+    return trimmed;
+  }
+  const lower = trimmed.toLowerCase();
+  return lower === 'me' || lower === 'mel' || lower === 'melia' || lower === 'meme'
+    ? 'le gnome'
+    : trimmed;
+};
+
 const getDefaultName = (): string => {
   const discordName = auth.state.user?.username;
   return discordName && discordName.length > 0 ? discordName : lastName.value;
@@ -151,7 +162,7 @@ const goRules = () => {
 };
 
 const openCreate = () => {
-  createName.value = getDefaultName();
+  createName.value = normalizeGuestName(getDefaultName());
   showNameDialog.value = true;
 };
 
@@ -162,14 +173,14 @@ const normalizeRoomCode = (code: string): string => {
 const openJoin = (spectator: boolean): void => {
   joinSpectator.value = spectator;
   joinCode.value = '';
-  joinName.value = getDefaultName();
+  joinName.value = normalizeGuestName(getDefaultName());
   showJoinDialog.value = true;
 };
 
 const openJoinWithCode = (code: string, spectator: boolean): void => {
   joinSpectator.value = spectator;
   joinCode.value = normalizeRoomCode(code);
-  joinName.value = getDefaultName();
+  joinName.value = normalizeGuestName(getDefaultName());
   showJoinDialog.value = true;
 };
 
@@ -202,22 +213,26 @@ const confirmCreate = async (): Promise<void> => {
   if (!createName.value) {
     return;
   }
-  persistName(createName.value);
+  const finalName = normalizeGuestName(createName.value);
+  createName.value = finalName;
+  persistName(finalName);
   showNameDialog.value = false;
   game.leaveRoom();
   router.push('/game');
-  await game.createRoom(createName.value);
+  await game.createRoom(finalName);
 };
 
 const confirmJoin = async (): Promise<void> => {
   if (!joinCode.value || !joinName.value) {
     return;
   }
-  persistName(joinName.value);
+  const finalName = normalizeGuestName(joinName.value);
+  joinName.value = finalName;
+  persistName(finalName);
   showJoinDialog.value = false;
   game.leaveRoom();
   router.push('/game');
-  await game.joinRoom(joinCode.value, joinName.value, joinSpectator.value);
+  await game.joinRoom(joinCode.value, finalName, joinSpectator.value);
 };
 
 onMounted(() => {
