@@ -6,6 +6,12 @@ services:
       - ADDR=:8080
       - WEB_DIR=/app/web
       - ALLOWED_ORIGINS=tictactoe.bxota.com
+      - DB_PATH=/data/tictactoe.db
+      - DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID}
+      - DISCORD_CLIENT_SECRET=${DISCORD_CLIENT_SECRET}
+      - DISCORD_REDIRECT_URL=${DISCORD_REDIRECT_URL}
+    volumes:
+      - app_data:/data
     networks:
       - web
 
@@ -28,3 +34,4 @@ networks:
 volumes:
   caddy_data:
   caddy_config:
+  app_data:

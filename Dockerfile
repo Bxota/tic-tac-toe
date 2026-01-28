@@ -7,7 +7,7 @@ COPY webapp .
 RUN npm run build
 
 # Build Go server
-FROM golang:1.22-alpine AS server-build
+FROM golang:1.24-alpine AS server-build
 WORKDIR /src
 COPY server/go.mod server/go.sum* ./server/
 WORKDIR /src/server

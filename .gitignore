@@ -26,3 +26,4 @@ coverage/
 .DS_Store
 webapp/node_modules/
 webapp/dist/
+.env

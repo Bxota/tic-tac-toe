@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -71,7 +72,8 @@ type outgoingMessage struct {
 }
 
 type createRoomPayload struct {
-	Name string `json:"name"`
+	Name    string `json:"name"`
+	GuestID string `json:"guest_id,omitempty"`
 }
 
 type joinRoomPayload struct {
@@ -79,6 +81,7 @@ type joinRoomPayload struct {
 	PlayerID  string `json:"player_id,omitempty"`
 	Name      string `json:"name,omitempty"`
 	Spectator bool   `json:"spectator,omitempty"`
+	GuestID   string `json:"guest_id,omitempty"`
 }
 
 type movePayload struct {
@@ -133,6 +136,7 @@ type Player struct {
 	name             string
 	symbol           string
 	spectator        bool
+	userID           int64
 	conn             *websocket.Conn
 	connected        bool
 	sendMu           sync.Mutex
@@ -147,6 +151,8 @@ type Room struct {
 	startingSymbol string
 	winner         string
 	draw           bool
+	startedAt      time.Time
+	recorded       bool
 
 	playerX    *Player
 	playerO    *Player
@@ -157,27 +163,49 @@ type Room struct {
 }
 
 type Server struct {
-	rooms map[string]*Room
-	mu    sync.RWMutex
+	rooms   map[string]*Room
+	mu      sync.RWMutex
+	db      *sql.DB
+	discord discordConfig
 }
 
 type Session struct {
 	room   *Room
 	player *Player
+	userID *int64
 	mu     sync.RWMutex
 }
 
 func main() {
 	addr := envOr("ADDR", ":8080")
 	webDir := resolveWebDir()
+	dbPath := envOr("DB_PATH", "./data/tictactoe.db")
 
-	srv := NewServer()
+	db, err := openDB(dbPath)
+	if err != nil {
+		log.Fatalf("db init failed: %v", err)
+	}
+
+	discordConfig, err := loadDiscordConfig()
+	if err != nil {
+		log.Printf("discord oauth disabled: %v", err)
+	}
+
+	srv := NewServer(db, discordConfig)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", srv.handleWS)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
+	mux.HandleFunc("/auth/discord/login", srv.handleDiscordLogin)
+	mux.HandleFunc("/auth/discord/callback", srv.handleDiscordCallback)
+	mux.HandleFunc("/auth/refresh", srv.handleRefresh)
+	mux.HandleFunc("/auth/me", srv.handleMe)
+	mux.HandleFunc("/auth/logout", srv.handleLogout)
+	mux.HandleFunc("/auth/ws-ticket", srv.handleWSTicket)
+	mux.HandleFunc("/api/history", srv.handleHistory)
+	mux.HandleFunc("/api/stats", srv.handleStats)
 
 	if webDir != "" {
 		mux.Handle("/", spaHandler(webDir))
@@ -187,16 +215,27 @@ func main() {
 	}
 
 	log.Printf("listening on %s", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	handler := withCORS(mux)
+	if err := http.ListenAndServe(addr, handler); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func NewServer() *Server {
-	return &Server{rooms: make(map[string]*Room)}
+func NewServer(db *sql.DB, discord discordConfig) *Server {
+	return &Server{rooms: make(map[string]*Room), db: db, discord: discord}
 }
 
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
+	var userID *int64
+	if ticket := strings.TrimSpace(r.URL.Query().Get("ticket")); ticket != "" {
+		id, err := s.consumeWSTicket(ticket)
+		if err != nil {
+			http.Error(w, "invalid ws ticket", http.StatusUnauthorized)
+			return
+		}
+		userID = &id
+	}
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("upgrade failed: %v", err)
@@ -204,7 +243,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	session := &Session{}
+	session := &Session{userID: userID}
 
 	conn.SetReadLimit(maxMessageSize)
 	_ = conn.SetReadDeadline(time.Now().Add(pongWait))
@@ -242,7 +281,11 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		case "create_room":
 			var payload createRoomPayload
 			_ = json.Unmarshal(msg.Payload, &payload)
-			room, player := s.createRoom(conn, payload.Name)
+			room, player, err := s.createRoom(conn, payload.Name, session.getUserID(), payload.GuestID)
+			if err != nil {
+				sendError(conn, err.Error())
+				continue
+			}
 			session.set(room, player)
 
 			response := roomResponsePayload{
@@ -262,7 +305,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			room, player, reconnected, err := s.joinRoom(conn, payload.RoomCode, payload.PlayerID, payload.Name, payload.Spectator)
+			room, player, reconnected, err := s.joinRoom(conn, payload.RoomCode, payload.PlayerID, payload.Name, payload.Spectator, session.getUserID(), payload.GuestID)
 			if err != nil {
 				sendError(conn, err.Error())
 				continue
@@ -314,12 +357,17 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) createRoom(conn *websocket.Conn, name string) (*Room, *Player) {
+func (s *Server) createRoom(conn *websocket.Conn, name string, sessionUserID *int64, guestID string) (*Room, *Player, error) {
 	code := s.uniqueRoomCode()
+	userID, err := s.resolveUserID(sessionUserID, guestID, sanitizeName(name, "Joueur X"))
+	if err != nil {
+		return nil, nil, err
+	}
 	player := &Player{
 		id:        randomID(),
 		name:      sanitizeName(name, "Joueur X"),
 		symbol:    symbolX,
+		userID:    userID,
 		conn:      conn,
 		connected: true,
 	}
@@ -328,6 +376,7 @@ func (s *Server) createRoom(conn *websocket.Conn, name string) (*Room, *Player) 
 		code:           code,
 		turn:           symbolX,
 		startingSymbol: symbolX,
+		startedAt:      time.Now().UTC(),
 		playerX:        player,
 		spectators:     make(map[string]*Player),
 	}
@@ -336,13 +385,18 @@ func (s *Server) createRoom(conn *websocket.Conn, name string) (*Room, *Player) 
 	s.rooms[code] = room
 	s.mu.Unlock()
 
-	return room, player
+	return room, player, nil
 }
 
-func (s *Server) joinRoom(conn *websocket.Conn, code, playerID, name string, spectator bool) (*Room, *Player, bool, error) {
+func (s *Server) joinRoom(conn *websocket.Conn, code, playerID, name string, spectator bool, sessionUserID *int64, guestID string) (*Room, *Player, bool, error) {
 	room := s.getRoom(code)
 	if room == nil {
 		return nil, nil, false, errors.New("room not found")
+	}
+
+	resolvedUserID, err := s.resolveUserID(sessionUserID, guestID, sanitizeName(name, "Joueur"))
+	if err != nil {
+		return nil, nil, false, err
 	}
 
 	room.mu.Lock()
@@ -353,7 +407,7 @@ func (s *Server) joinRoom(conn *websocket.Conn, code, playerID, name string, spe
 	}
 
 	if spectator {
-		return joinSpectator(room, conn, playerID, name)
+		return joinSpectator(room, conn, playerID, name, resolvedUserID)
 	}
 
 	if playerID != "" {
@@ -365,6 +419,9 @@ func (s *Server) joinRoom(conn *websocket.Conn, code, playerID, name string, spe
 			if name != "" {
 				room.playerX.name = sanitizeName(name, room.playerX.name)
 			}
+			if room.playerX.userID == 0 && resolvedUserID != 0 {
+				room.playerX.userID = resolvedUserID
+			}
 			return room, room.playerX, true, nil
 		}
 
@@ -375,6 +432,9 @@ func (s *Server) joinRoom(conn *websocket.Conn, code, playerID, name string, spe
 			attachPlayer(room.playerO, conn)
 			if name != "" {
 				room.playerO.name = sanitizeName(name, room.playerO.name)
+			}
+			if room.playerO.userID == 0 && resolvedUserID != 0 {
+				room.playerO.userID = resolvedUserID
 			}
 			return room, room.playerO, true, nil
 		}
@@ -388,6 +448,7 @@ func (s *Server) joinRoom(conn *websocket.Conn, code, playerID, name string, spe
 		id:        randomID(),
 		name:      sanitizeName(name, "Joueur O"),
 		symbol:    symbolO,
+		userID:    resolvedUserID,
 		conn:      conn,
 		connected: true,
 	}
@@ -396,7 +457,7 @@ func (s *Server) joinRoom(conn *websocket.Conn, code, playerID, name string, spe
 	return room, player, false, nil
 }
 
-func joinSpectator(room *Room, conn *websocket.Conn, spectatorID, name string) (*Room, *Player, bool, error) {
+func joinSpectator(room *Room, conn *websocket.Conn, spectatorID, name string, userID int64) (*Room, *Player, bool, error) {
 	if room.spectators == nil {
 		room.spectators = make(map[string]*Player)
 	}
@@ -410,6 +471,9 @@ func joinSpectator(room *Room, conn *websocket.Conn, spectatorID, name string) (
 			if name != "" {
 				spectator.name = sanitizeName(name, spectator.name)
 			}
+			if spectator.userID == 0 && userID != 0 {
+				spectator.userID = userID
+			}
 			return room, spectator, true, nil
 		}
 	}
@@ -418,6 +482,7 @@ func joinSpectator(room *Room, conn *websocket.Conn, spectatorID, name string) (
 		id:        randomID(),
 		name:      sanitizeName(name, "Spectateur"),
 		spectator: true,
+		userID:    userID,
 		conn:      conn,
 		connected: true,
 	}
@@ -432,7 +497,7 @@ func (s *Server) applyMove(payload movePayload) error {
 		return errors.New("room not found")
 	}
 
-	state, recipients, err := room.applyMove(payload)
+	state, recipients, record, err := room.applyMove(payload)
 	if err != nil {
 		return err
 	}
@@ -440,6 +505,12 @@ func (s *Server) applyMove(payload movePayload) error {
 	msg := newMessage("state", state)
 	for _, client := range recipients {
 		_ = client.send(msg)
+	}
+
+	if record != nil {
+		if err := s.recordGame(*record); err != nil {
+			log.Printf("game record failed: %v", err)
+		}
 	}
 
 	return nil
@@ -578,41 +649,41 @@ func (s *Server) broadcastState(room *Room) {
 	}
 }
 
-func (r *Room) applyMove(payload movePayload) (statePayload, []*Player, error) {
+func (r *Room) applyMove(payload movePayload) (statePayload, []*Player, *gameRecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	if r.closed {
-		return statePayload{}, nil, errors.New("room is closed")
+		return statePayload{}, nil, nil, errors.New("room is closed")
 	}
 
 	if payload.Cell < 0 || payload.Cell > 8 {
-		return statePayload{}, nil, errors.New("invalid cell")
+		return statePayload{}, nil, nil, errors.New("invalid cell")
 	}
 
 	player := r.playerByID(payload.PlayerID)
 	if player == nil {
-		return statePayload{}, nil, errors.New("player not found in room")
+		return statePayload{}, nil, nil, errors.New("player not found in room")
 	}
 
 	if !player.connected {
-		return statePayload{}, nil, errors.New("player disconnected")
+		return statePayload{}, nil, nil, errors.New("player disconnected")
 	}
 
 	if !playerConnected(r.playerX) || !playerConnected(r.playerO) {
-		return statePayload{}, nil, errors.New("waiting for opponent")
+		return statePayload{}, nil, nil, errors.New("waiting for opponent")
 	}
 
 	if r.winner != "" || r.draw {
-		return statePayload{}, nil, errors.New("game already finished")
+		return statePayload{}, nil, nil, errors.New("game already finished")
 	}
 
 	if r.turn != player.symbol {
-		return statePayload{}, nil, errors.New("not your turn")
+		return statePayload{}, nil, nil, errors.New("not your turn")
 	}
 
 	if r.board[payload.Cell] != "" {
-		return statePayload{}, nil, errors.New("cell already taken")
+		return statePayload{}, nil, nil, errors.New("cell already taken")
 	}
 
 	r.board[payload.Cell] = player.symbol
@@ -628,7 +699,15 @@ func (r *Room) applyMove(payload movePayload) (statePayload, []*Player, error) {
 	state := r.snapshotLocked()
 	recipients := r.connectedClientsLocked()
 
-	return state, recipients, nil
+	var record *gameRecord
+	if (r.winner != "" || r.draw) && !r.recorded {
+		r.recorded = true
+		endedAt := time.Now().UTC()
+		game := buildGameRecord(r, endedAt)
+		record = &game
+	}
+
+	return state, recipients, record, nil
 }
 
 func (r *Room) snapshot() statePayload {
@@ -738,6 +817,8 @@ func (r *Room) resetGameLocked() {
 	r.turn = r.startingSymbol
 	r.winner = ""
 	r.draw = false
+	r.recorded = false
+	r.startedAt = time.Now().UTC()
 }
 
 func attachPlayer(player *Player, conn *websocket.Conn) {
@@ -868,7 +949,9 @@ func resolveWebDir() string {
 	}
 
 	candidates := []string{
+		"../build/web",
 		"../webapp/dist",
+		"./web",
 	}
 	for _, candidate := range candidates {
 		if dirExists(candidate) {
@@ -940,11 +1023,41 @@ func isOriginAllowed(origin string) bool {
 	return ok
 }
 
+func withCORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if origin != "" {
+			if !isOriginAllowed(origin) {
+				http.Error(w, "origin not allowed", http.StatusForbidden)
+				return
+			}
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+			w.Header().Add("Vary", "Origin")
+		}
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
 func (s *Session) set(room *Room, player *Player) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.room = room
 	s.player = player
+}
+
+func (s *Session) getUserID() *int64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.userID
 }
 
 func (s *Session) getPlayer() *Player {

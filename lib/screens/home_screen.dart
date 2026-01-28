@@ -2,14 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../controllers/game_controller.dart';
+import '../controllers/profile_controller.dart';
 import '../ui/widgets.dart';
 import 'game_screen.dart';
 import 'rules_screen.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key, required this.controller});
+  const HomeScreen({super.key, required this.controller, required this.profile});
 
   final GameController controller;
+  final ProfileController profile;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -25,6 +27,12 @@ class _JoinResult {
 class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _roomController = TextEditingController();
   String _lastName = '';
+
+  @override
+  void initState() {
+    super.initState();
+    widget.profile.init();
+  }
 
   @override
   void dispose() {
@@ -120,6 +128,39 @@ class _HomeScreenState extends State<HomeScreen> {
     if (result != null && result.name.isNotEmpty) {
       _lastName = result.name;
     }
+    return result;
+  }
+
+  Future<String?> _showTokenDialog() async {
+    final tokenController = TextEditingController();
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: AppColors.card,
+          title: const Text('Jeton de session'),
+          content: TextField(
+            controller: tokenController,
+            decoration: const InputDecoration(
+              hintText: 'Colle le refresh token',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Annuler'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop(tokenController.text.trim());
+              },
+              child: const Text('Continuer'),
+            ),
+          ],
+        );
+      },
+    );
+    tokenController.dispose();
     return result;
   }
 
@@ -262,6 +303,145 @@ class _HomeScreenState extends State<HomeScreen> {
                 },
               ),
               const SizedBox(height: 12),
+              AnimatedBuilder(
+                animation: widget.profile,
+                builder: (context, _) {
+                  final user = widget.profile.user;
+                  final stats = widget.profile.stats;
+                  final authLoading = widget.profile.authStatus == LoadStatus.loading;
+                  final statsLoading = widget.profile.statsStatus == LoadStatus.loading;
+                  return Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: AppColors.cardSoft,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: AppColors.outline.withValues(alpha: 0.6)),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.25),
+                          blurRadius: 10,
+                          offset: const Offset(0, 6),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Row(
+                              children: [
+                                if (user?.avatar != null && user!.avatar!.isNotEmpty)
+                                  CircleAvatar(
+                                    radius: 18,
+                                    backgroundImage: NetworkImage(user.avatar!),
+                                  )
+                                else
+                                  const CircleAvatar(
+                                    radius: 18,
+                                    backgroundColor: AppColors.outline,
+                                    child: Icon(Icons.person, size: 18),
+                                  ),
+                                const SizedBox(width: 10),
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Compte',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: AppColors.textMuted.withValues(alpha: 0.9),
+                                      ),
+                                    ),
+                                    Text(
+                                      user?.username ?? 'Invite',
+                                      style: const TextStyle(fontSize: 13),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                            SizedBox(
+                              width: 140,
+                              child: SoftButton(
+                                label: user == null ? 'Se connecter' : 'Deconnexion',
+                                filled: user == null,
+                                onPressed: () async {
+                                  if (user != null) {
+                                    await widget.profile.logout();
+                                    return;
+                                  }
+                                  final token = await _showTokenDialog();
+                                  if (token == null || token.isEmpty) {
+                                    return;
+                                  }
+                                  await widget.profile.authenticateWithRefreshToken(token);
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (authLoading)
+                          const Padding(
+                            padding: EdgeInsets.only(top: 8),
+                            child: Text(
+                              'Connexion...',
+                              style: TextStyle(fontSize: 12, color: AppColors.textMuted),
+                            ),
+                          ),
+                        if (widget.profile.authError != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Text(
+                              widget.profile.authError!,
+                              style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
+                            ),
+                          ),
+                        if (user != null) ...[
+                          const SizedBox(height: 10),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text(
+                                'Stats',
+                                style: TextStyle(fontSize: 12, color: AppColors.textMuted),
+                              ),
+                              if (statsLoading)
+                                const Text(
+                                  'Chargement...',
+                                  style: TextStyle(fontSize: 12, color: AppColors.textMuted),
+                                ),
+                            ],
+                          ),
+                          if (widget.profile.statsError != null)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 6),
+                              child: Text(
+                                widget.profile.statsError!,
+                                style: const TextStyle(fontSize: 12, color: AppColors.textMuted),
+                              ),
+                            )
+                          else if (stats != null)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 6),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  _StatItem(label: 'Total', value: stats.total),
+                                  _StatItem(label: 'Victoires', value: stats.wins),
+                                  _StatItem(label: 'Defaites', value: stats.losses),
+                                  _StatItem(label: 'Nuls', value: stats.draws),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ],
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: 12),
               Text(
                 'Serveur: ${widget.controller.serverUrl}',
                 textAlign: TextAlign.center,
@@ -275,6 +455,30 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _StatItem extends StatelessWidget {
+  const _StatItem({required this.label, required this.value});
+
+  final String label;
+  final int value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Text(
+          label,
+          style: const TextStyle(fontSize: 11, color: AppColors.textMuted),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          value.toString(),
+          style: const TextStyle(fontSize: 13),
+        ),
+      ],
     );
   }
 }

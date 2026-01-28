@@ -76,6 +76,23 @@ input {
   justify-content: center;
 }
 
+.avatar {
+  height: 44px;
+  width: 44px;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid rgba(61, 70, 104, 0.6);
+  background: var(--card-soft);
+  box-shadow: var(--shadow-sm);
+}
+
+.avatar img {
+  height: 100%;
+  width: 100%;
+  object-fit: cover;
+  display: block;
+}
+
 .section-title {
   font-size: 24px;
   font-weight: 800;
@@ -113,6 +130,14 @@ input {
   background: var(--card-soft);
   color: var(--text-primary);
   border: 1px solid rgba(61, 70, 104, 0.6);
+}
+
+.soft-button--compact {
+  width: auto;
+  padding: 8px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .circle-button {
@@ -168,6 +193,14 @@ input {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+}
+
+.card {
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(61, 70, 104, 0.6);
+  background: var(--card-soft);
+  box-shadow: var(--shadow-md);
 }
 
 .status-card .label {

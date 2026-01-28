@@ -1,4 +1,5 @@
 import { reactive, computed } from 'vue';
+import { useAuth } from './useAuth';
 
 type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
@@ -40,6 +41,19 @@ const defaultWsUrl = (): string => {
   return `${scheme}://${window.location.host}/ws`;
 };
 
+const attachTicket = (baseUrl: string, ticket: string | null): string => {
+  if (!ticket) {
+    return baseUrl;
+  }
+  try {
+    const url = new URL(baseUrl);
+    url.searchParams.set('ticket', ticket);
+    return url.toString();
+  } catch (error) {
+    return baseUrl;
+  }
+};
+
 const state = reactive({
   serverUrl: defaultWsUrl(),
   connectionStatus: 'disconnected' as ConnectionStatus,
@@ -56,6 +70,7 @@ const state = reactive({
 let socket: WebSocket | null = null;
 let manualClose = false;
 let pendingMessages: string[] = [];
+const auth = useAuth();
 
 const isConnected = computed(() => state.connectionStatus === 'connected');
 const isSpectator = computed(() => state.role === 'spectator');
@@ -73,7 +88,9 @@ const connect = async (): Promise<void> => {
   state.errorMessage = null;
   try {
     manualClose = false;
-    socket = new WebSocket(state.serverUrl);
+    const ticket = await auth.getWsTicket();
+    const wsUrl = attachTicket(state.serverUrl, ticket);
+    socket = new WebSocket(wsUrl);
     socket.addEventListener('open', () => {
       state.connectionStatus = 'connected';
       pendingMessages.forEach((message) => socket?.send(message));
@@ -201,7 +218,7 @@ const createRoom = async (name: string): Promise<void> => {
   state.roomClosedReason = null;
   state.errorMessage = null;
   await ensureConnected();
-  send('create_room', { name });
+  send('create_room', { name, guest_id: auth.guestId });
 };
 
 const joinRoom = async (code: string, name: string, spectator = false): Promise<void> => {
@@ -209,7 +226,7 @@ const joinRoom = async (code: string, name: string, spectator = false): Promise<
   state.roomClosedReason = null;
   state.errorMessage = null;
   await ensureConnected();
-  send('join_room', { room_code: code.toUpperCase(), name, spectator });
+  send('join_room', { room_code: code.toUpperCase(), name, spectator, guest_id: auth.guestId });
 };
 
 const reconnect = async (): Promise<void> => {
@@ -225,6 +242,7 @@ const reconnect = async (): Promise<void> => {
     room_code: state.roomCode,
     player_id: state.playerId,
     spectator: isSpectator.value,
+    guest_id: auth.guestId,
   });
 };
 

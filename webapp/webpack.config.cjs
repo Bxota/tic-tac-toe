@@ -59,6 +59,7 @@ module.exports = {
     }),
     new DefinePlugin({
       __VITE_WS_URL__: JSON.stringify(process.env.VITE_WS_URL || ''),
+      __VITE_API_URL__: JSON.stringify(process.env.VITE_API_URL || ''),
     }),
   ],
   devServer: {
@@ -68,6 +69,26 @@ module.exports = {
     historyApiFallback: true,
     port: 5173,
     hot: true,
+    client: {
+      webSocketURL: { pathname: '/ws-dev' },
+    },
+    webSocketServer: {
+      type: 'ws',
+      options: { path: '/ws-dev' },
+    },
+    proxy: [
+      {
+        context: ['/auth', '/api'],
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+      {
+        context: (pathname) => pathname === '/ws',
+        target: 'ws://localhost:8080',
+        ws: true,
+        changeOrigin: true,
+      },
+    ],
   },
   devtool: isProd ? false : 'source-map',
 };
