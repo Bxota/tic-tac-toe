@@ -1,6 +1,6 @@
 services:
   app:
-    image: ghcr.io/bxota/tic-tac-toe-mobile:latest
+    image: ghcr.io/bxota/tic-tac-toe:latest
     restart: unless-stopped
     env_file:
       - .env
