@@ -1,5 +1,6 @@
 <template>
-  <div class="container">
+  <div class="container game-screen" :class="{ 'screen-shake': shakeActive }">
+    <canvas v-show="confettiVisible" ref="confettiCanvas" class="confetti-layer"></canvas>
     <div class="row between">
     <CircleIconButton icon="<" @click="goBack" />
       <span style="font-weight: 700; font-size: 14px;">Salon {{ roomCode }}</span>
@@ -77,7 +78,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, watch } from 'vue';
+import { computed, onMounted, watch, onBeforeUnmount, ref } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import CircleIconButton from '../components/CircleIconButton.vue';
 import PlayerStatusCard from '../components/PlayerStatusCard.vue';
@@ -88,6 +89,12 @@ import { useGame } from '../composables/useGame';
 const router = useRouter();
 const route = useRoute();
 const game = useGame();
+const shakeActive = ref(false);
+const confettiVisible = ref(false);
+const confettiCanvas = ref<HTMLCanvasElement | null>(null);
+let confettiFrame: number | null = null;
+let confettiTimeout: number | null = null;
+let shakeTimeout: number | null = null;
 
 const roomCode = computed(() => game.state.roomCode || '----');
 const state = computed(() => game.state.gameState);
@@ -245,4 +252,172 @@ watch(
     redirectToJoinIfNeeded();
   },
 );
+
+let lastStatus: string | null = state.value?.status ?? null;
+let lastWinner = state.value?.winner ?? '';
+
+const prefersReducedMotion = (): boolean => {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+};
+
+const triggerShake = (): void => {
+  if (prefersReducedMotion()) {
+    return;
+  }
+  if (shakeTimeout) {
+    window.clearTimeout(shakeTimeout);
+    shakeTimeout = null;
+  }
+  shakeActive.value = false;
+  window.requestAnimationFrame(() => {
+    shakeActive.value = true;
+    shakeTimeout = window.setTimeout(() => {
+      shakeActive.value = false;
+      shakeTimeout = null;
+    }, 320);
+  });
+};
+
+type ConfettiParticle = {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  size: number;
+  rotation: number;
+  rotationSpeed: number;
+  color: string;
+};
+
+const createParticles = (count: number, width: number, height: number): ConfettiParticle[] => {
+  const palette = [
+    'rgba(156, 174, 255, 0.75)',
+    'rgba(156, 227, 125, 0.75)',
+    'rgba(245, 155, 155, 0.75)',
+    'rgba(242, 192, 137, 0.7)',
+    'rgba(245, 247, 255, 0.5)',
+  ];
+  return Array.from({ length: count }, () => ({
+    x: Math.random() * width,
+    y: -height * 0.2 + Math.random() * height * 0.4,
+    vx: -30 + Math.random() * 60,
+    vy: 50 + Math.random() * 120,
+    size: 3 + Math.random() * 4,
+    rotation: Math.random() * Math.PI * 2,
+    rotationSpeed: -3 + Math.random() * 6,
+    color: palette[Math.floor(Math.random() * palette.length)],
+  }));
+};
+
+const stopConfetti = (): void => {
+  if (confettiFrame) {
+    window.cancelAnimationFrame(confettiFrame);
+    confettiFrame = null;
+  }
+  if (confettiTimeout) {
+    window.clearTimeout(confettiTimeout);
+    confettiTimeout = null;
+  }
+  const canvas = confettiCanvas.value;
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    ctx?.clearRect(0, 0, canvas.width, canvas.height);
+  }
+  confettiVisible.value = false;
+};
+
+const triggerConfetti = (): void => {
+  if (prefersReducedMotion()) {
+    return;
+  }
+  const canvas = confettiCanvas.value;
+  if (!canvas || typeof window === 'undefined') {
+    return;
+  }
+  stopConfetti();
+  confettiVisible.value = true;
+
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = width * dpr;
+  canvas.height = height * dpr;
+  canvas.style.width = `${width}px`;
+  canvas.style.height = `${height}px`;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    return;
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  const particles = createParticles(80, width, height);
+  const gravity = 220;
+  const durationMs = 1800;
+  const fadeStartMs = 1200;
+  const startTime = performance.now();
+  let lastTime = startTime;
+
+  const draw = (time: number): void => {
+    const elapsed = time - startTime;
+    const delta = Math.min(0.05, (time - lastTime) / 1000);
+    lastTime = time;
+    ctx.clearRect(0, 0, width, height);
+    const fade = elapsed < fadeStartMs ? 1 : Math.max(0, 1 - (elapsed - fadeStartMs) / 600);
+    ctx.globalAlpha = fade;
+
+    for (const particle of particles) {
+      particle.vy += gravity * delta;
+      particle.x += particle.vx * delta;
+      particle.y += particle.vy * delta;
+      particle.rotation += particle.rotationSpeed * delta;
+
+      ctx.save();
+      ctx.translate(particle.x, particle.y);
+      ctx.rotate(particle.rotation);
+      ctx.fillStyle = particle.color;
+      ctx.fillRect(-particle.size * 0.8, -particle.size * 0.5, particle.size * 1.6, particle.size);
+      ctx.restore();
+    }
+
+    if (elapsed < durationMs) {
+      confettiFrame = window.requestAnimationFrame(draw);
+    } else {
+      stopConfetti();
+    }
+  };
+
+  confettiFrame = window.requestAnimationFrame(draw);
+  confettiTimeout = window.setTimeout(stopConfetti, durationMs + 100);
+};
+
+watch(
+  () => [state.value?.status, state.value?.winner],
+  ([status, winner]) => {
+    if (status === 'win' && winner && !isSpectator.value) {
+      const shouldTrigger = status !== lastStatus || winner !== lastWinner;
+      if (shouldTrigger) {
+        if (winner === symbol.value) {
+          triggerConfetti();
+        } else {
+          triggerShake();
+        }
+      }
+    }
+    if (status !== 'win') {
+      stopConfetti();
+    }
+    lastStatus = status ?? null;
+    lastWinner = winner ?? '';
+  },
+);
+
+onBeforeUnmount(() => {
+  stopConfetti();
+  if (shakeTimeout) {
+    window.clearTimeout(shakeTimeout);
+  }
+});
 </script>

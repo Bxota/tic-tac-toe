@@ -344,6 +344,48 @@ input {
   opacity: 0;
 }
 
+.game-screen {
+  position: relative;
+}
+
+.confetti-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.screen-shake {
+  animation: screen-shake 0.32s ease-in-out;
+}
+
+@keyframes screen-shake {
+  0% {
+    transform: translateX(0);
+  }
+  20% {
+    transform: translateX(-6px);
+  }
+  40% {
+    transform: translateX(5px);
+  }
+  60% {
+    transform: translateX(-3px);
+  }
+  80% {
+    transform: translateX(2px);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .screen-shake {
+    animation: none;
+  }
+}
+
 @media (max-width: 480px) {
   .container {
     padding: 16px 18px 24px;

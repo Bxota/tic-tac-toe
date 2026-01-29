@@ -13,7 +13,7 @@ services:
       - DISCORD_CLIENT_SECRET=${DISCORD_CLIENT_SECRET}
       - DISCORD_REDIRECT_URL=${DISCORD_REDIRECT_URL}
     volumes:
-      - app_data:/data
+      - /opt/tictactoe/data:/data
     networks:
       - web
 
@@ -36,4 +36,3 @@ networks:
 volumes:
   caddy_data:
   caddy_config:
-  app_data:
