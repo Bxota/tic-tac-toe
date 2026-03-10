@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <defs>
+    <radialGradient id="bg" cx="40%" cy="35%" r="65%">
+      <stop offset="0%" stop-color="#2e3a5c"/>
+      <stop offset="100%" stop-color="#1a2140"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Background rounded square, dark navy/indigo -->
+  <rect x="0" y="0" width="32" height="32" rx="7" fill="url(#bg)"/>
+
+  <!-- X — large, white, top-left -->
+  <line x1="7" y1="8" x2="17" y2="18" stroke="white" stroke-width="3" stroke-linecap="round"/>
+  <line x1="17" y1="8" x2="7" y2="18" stroke="white" stroke-width="3" stroke-linecap="round"/>
+
+  <!-- O — smaller, lavender/violet, bottom-right -->
+  <circle cx="22" cy="22" r="6" fill="none" stroke="#8b8fff" stroke-width="2.8"/>
+</svg>
