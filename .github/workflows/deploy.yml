@@ -28,6 +28,16 @@ jobs:
           docker build -t $IMAGE_NAME:latest .
           docker push $IMAGE_NAME:latest
 
+      - name: Copy docker-compose to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: "deploy/docker-compose.yml"
+          target: /opt/tictactoe
+          strip_components: 1
+
       - uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VPS_HOST }}
