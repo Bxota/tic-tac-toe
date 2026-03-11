@@ -15,24 +15,11 @@ services:
     volumes:
       - /opt/tictactoe/data:/data
     networks:
-      - web
-
-  caddy:
-    image: caddy:2
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
-      - caddy_data:/data
-      - caddy_config:/config
-    networks:
-      - web
+      caddy_net:
+        aliases:
+          - tictactoe_app
 
 networks:
-  web:
-
-volumes:
-  caddy_data:
-  caddy_config:
+  caddy_net:
+    name: caddy_net
+    external: true
